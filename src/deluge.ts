@@ -2,8 +2,6 @@ import { existsSync } from 'fs';
 
 import { File, FormData } from 'formdata-node';
 import { fileFromPath } from 'formdata-node/file-from-path';
-import type { Response } from 'got';
-import got from 'got';
 import { Cookie } from 'tough-cookie';
 
 import { magnetDecode } from '@ctrl/magnet-link';
@@ -17,6 +15,7 @@ import type {
 import { TorrentState } from '@ctrl/shared-torrent';
 import { urlJoin } from '@ctrl/url-join';
 
+import { HTTPRequestClient, injectClient, Response } from './client.js';
 import type {
   AddTorrentOptions,
   AddTorrentResponse,
@@ -51,16 +50,18 @@ export class Deluge implements TorrentClient {
   config: TorrentSettings;
 
   private _msgId = 0;
-
+  private client: HTTPRequestClient;
   private _cookie?: Cookie;
 
   constructor(options: Partial<TorrentSettings> = {}) {
     this.config = { ...defaults, ...options };
+    this.client = injectClient();
   }
 
   resetSession(): void {
     this._cookie = undefined;
     this._msgId = 0;
+    this.client = injectClient();
   }
 
   async getHosts(): Promise<GetHostsResponse> {
@@ -227,7 +228,7 @@ export class Deluge implements TorrentClient {
     }
 
     const url = urlJoin(this.config.baseUrl, '/upload');
-    const res = await got.post(url, {
+    const res = await this.client.upload<string>(url, {
       body: form,
       retry: { limit: 0 },
       timeout: { request: this.config.timeout },
@@ -447,7 +448,7 @@ export class Deluge implements TorrentClient {
       ...additionalFields,
     ];
     const req = await this.request<TorrentListResponse>('web.update_ui', [
-      [...new Set(fields)],
+      [Array.from(new Set(fields))],
       filter,
     ]);
     return req.body;
@@ -660,7 +661,7 @@ export class Deluge implements TorrentClient {
       Cookie: this._cookie?.cookieString?.(),
     };
     const url = urlJoin(this.config.baseUrl, this.config.path);
-    const res: Response<T> = await got.post(url, {
+    const res: Response<T> = await this.client.request<T>(url, {
       json: {
         method,
         params,
