@@ -2,7 +2,6 @@ import { existsSync } from 'fs';
 
 import { File, FormData } from 'formdata-node';
 import { fileFromPath } from 'formdata-node/file-from-path';
-import { Cookie } from 'tough-cookie';
 
 import { magnetDecode } from '@ctrl/magnet-link';
 import type {
@@ -51,7 +50,7 @@ export class Deluge implements TorrentClient {
 
   private _msgId = 0;
   private client: HTTPRequestClient;
-  private _cookie?: Cookie;
+  private _isLoggedIn = false;
 
   constructor(options: Partial<TorrentSettings> = {}) {
     this.config = { ...defaults, ...options };
@@ -59,7 +58,7 @@ export class Deluge implements TorrentClient {
   }
 
   resetSession(): void {
-    this._cookie = undefined;
+    this._isLoggedIn = false;
     this._msgId = 0;
     this.client = injectClient();
   }
@@ -128,18 +127,7 @@ export class Deluge implements TorrentClient {
    * @returns true if valid
    */
   async checkSession(): Promise<boolean> {
-    // cookie is missing or expires in x seconds
-    if (this._cookie) {
-      // eslint-disable-next-line new-cap
-      if (this._cookie.TTL() < 5000) {
-        this.resetSession();
-        return false;
-      }
-
-      return true;
-    }
-
-    if (this._cookie) {
+    if (this._isLoggedIn) {
       try {
         const check = await this.request<BooleanStatus>('auth.check_session', undefined, false);
         if (check?.body?.result) {
@@ -161,11 +149,12 @@ export class Deluge implements TorrentClient {
   async login(): Promise<boolean> {
     this.resetSession();
     const res = await this.request<BooleanStatus>('auth.login', [this.config.password], false);
-    if (!res.body.result || !res.headers || !res.headers['set-cookie']) {
+
+    if (!res.body.result) {
       throw new Error('Auth failed, incorrect password');
     }
 
-    this._cookie = Cookie.parse(res.headers['set-cookie'][0]);
+    this._isLoggedIn = true;
     return true;
   }
 
@@ -379,13 +368,13 @@ export class Deluge implements TorrentClient {
       this.config.password,
       password,
     ]);
-    if (!res.body.result || !res.headers || !res.headers['set-cookie']) {
+    if (!res.body.result) {
       throw new Error('Old password incorrect');
     }
 
     // update current password to new password
     this.config.password = password;
-    this._cookie = Cookie.parse(res.headers['set-cookie'][0]);
+    this._isLoggedIn = true;
     return res.body;
   }
 
@@ -448,7 +437,7 @@ export class Deluge implements TorrentClient {
       ...additionalFields,
     ];
     const req = await this.request<TorrentListResponse>('web.update_ui', [
-      [Array.from(new Set(fields))],
+      Array.from(new Set(fields)),
       filter,
     ]);
     return req.body;
@@ -657,9 +646,6 @@ export class Deluge implements TorrentClient {
       }
     }
 
-    const headers: any = {
-      Cookie: this._cookie?.cookieString?.(),
-    };
     const url = urlJoin(this.config.baseUrl, this.config.path);
     const res: Response<T> = await this.client.request<T>(url, {
       json: {
@@ -667,7 +653,7 @@ export class Deluge implements TorrentClient {
         params,
         id: this._msgId++,
       },
-      headers,
+      headers: {},
       retry: { limit: 0 },
       timeout: { request: this.config.timeout },
       responseType: 'json',

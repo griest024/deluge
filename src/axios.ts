@@ -22,6 +22,7 @@ export const axiosClient: HTTPRequestClient = {
         httpAgent: options.agent?.http,
         httpsAgent: options.agent?.https,
         timeout: options.timeout.request,
+        withCredentials: true,
       })
       .then(mapBody);
   },
@@ -32,6 +33,7 @@ export const axiosClient: HTTPRequestClient = {
         httpAgent: options.agent?.http,
         httpsAgent: options.agent?.https,
         timeout: options.timeout.request,
+        withCredentials: true,
       })
       .then(mapBody);
   },
